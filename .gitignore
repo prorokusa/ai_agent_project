@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+*.pyd
+*.pyo
+.Python/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Environment variables
+.env
+
+# ChromaDB persistent directory (если используется)
+chroma_data/
+
+# Temporary files
+*.txt # Если у вас есть временные .txt файлы типа temp_project_summary.txt, не коммитьте их.

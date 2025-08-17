@@ -1,0 +1,6 @@
+openai
+python-dotenv
+chromadb
+ollama
+requests
+typing-extensions

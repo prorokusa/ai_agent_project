@@ -1,0 +1,117 @@
+import os
+import json # Добавлен для удобного вывода содержимого tool_calls
+from dotenv import load_dotenv
+
+# Импортируем все необходимые классы из их новых местоположений
+from implementations.llms.simple_inference_llm import SimpleInferenceLLM
+from implementations.llms.openai_llm import OpenAI_LLM 
+
+from implementations.tools.calculator_tool import CalculatorTool
+from implementations.tools.web_search_tool import GoogleCSESearchTool 
+
+from implementations.memory.chat_history_memory import ChatHistoryMemory
+
+from implementations.vector_stores.chromadb_store import ChromaDBStore
+
+from core.agent import AIAgent
+
+if __name__ == "__main__":
+    load_dotenv() # Загружаем переменные окружения (для OpenAI API Key, Google CSE API Key)
+
+    # 1. Инициализация компонентов
+    # Выберите LLM:
+    # my_llm = SimpleInferenceLLM(model_name="GPT-Dummy-3.5") # Используйте эту, если нет API ключа OpenAI или для быстрого теста без внешних вызовов
+    my_llm = OpenAI_LLM(model_name="gpt-3.5-turbo") # Рекомендуется для реального тестирования функций агента (требует API ключа OpenAI)
+
+    my_memory = ChatHistoryMemory()
+    
+    # Инициализация ChromaDBStore:
+    # Можно указать persist_directory для сохранения данных между запусками:
+    # my_vector_store = ChromaDBStore(llm_for_embedding=my_llm, persist_directory="./chroma_data")
+    # Для интерактивного тестирования, in-memory может быть удобнее (данные очищаются при перезапуске):
+    my_vector_store = ChromaDBStore(llm_for_embedding=my_llm) 
+
+    # 2. Определение системного промпта
+    system_prompt = (
+        "Ты очень полезный, дружелюбный и компетентный AI ассистент. "
+        "Твоя задача - точно отвечать на вопросы, использовать предоставленные инструменты, когда это уместно, "
+        "и извлекать информацию из векторного хранилища для ответов на вопросы о личных данных или контексте. "
+        "Всегда старайся быть вежливым и кратким, если это возможно. "
+        "Если пользователь задает вопрос, на который может ответить инструмент, предложи его использовать или используй его напрямую, если это очевидно. "
+        "Если вопрос касается твоей собственной информации или контекста, используй поиск по векторному хранилищу. "
+        "После выполнения инструмента или поиска в векторном хранилище, обобщи результаты и предоставь связный ответ."
+        "Будь готов использовать функцию `google_cse_search` для поиска актуальной информации в интернете, когда это необходимо." 
+        "Особенно используй `google_cse_search`, если вопрос касается текущих событий, статистических данных или общих фактов, отсутствующих в твоей памяти."
+        "Если пользователь просит проанализировать файл, ожидай, что содержание файла будет передано тебе как часть user-сообщения, и ты должен его проанализировать."
+    )
+
+    # 3. Создание агента с системным промптом
+    agent = AIAgent(llm=my_llm, memory=my_memory, vector_store=my_vector_store, system_prompt=system_prompt)
+
+    # 4. Регистрация инструментов
+    agent.register_tool(CalculatorTool())
+    agent.register_tool(GoogleCSESearchTool()) 
+
+    # 5. Добавление документов в векторное хранилище для демонстрации RAG (Retrieval Augmented Generation)
+    # Если вы используете persistent ChromaDB (persist_directory), вы можете закомментировать
+    # my_vector_store.clear() чтобы данные сохранялись между запусками.
+    # my_vector_store.clear() 
+    agent.vector_store.add_documents([
+        "Мое любимое хобби - это чтение книг по истории и философия.",
+        "Я живу в городе Москва, работаю инженером в IT-компании, мой адрес: ул. Пушкина, 10.",
+        "Последний раз мы обсуждали планы на отпуск в горах Кавказа в июле 2024 года.",
+        "Имя моего питомца - Барсик, он рыжий кот и очень любит играть с лазерной указкой.",
+        "Мои предпочтения в еде включают итальянскую кухню, особенно пиццу и пасту."
+    ], metadatas=[
+        {"type": "hobby"},
+        {"type": "personal_info", "city": "Москва"},
+        {"type": "past_discussion", "year": 2024},
+        {"type": "pet_info"},
+        {"type": "food_prefs"}
+    ])
+
+    print("\n--- Начало интерактивного диалога с Агентом ---")
+    print("Введите 'exit' для завершения.")
+    print("Чтобы отправить файл, введите 'file:<путь_к_файлу.txt>' (например, 'file:temp_doc.txt').")
+
+    while True:
+        user_input = input("\nВы: ")
+        if user_input.lower() == 'exit':
+            print("Завершение диалога.")
+            break
+        
+        if user_input.lower().startswith("file:"):
+            file_path = user_input[len("file:"):].strip()
+            if os.path.exists(file_path):
+                response = agent.process_message(file_input=file_path)
+                print(f"Агент (обработка файла): {response}")
+            else:
+                print(f"Ошибка: Файл не найден по пути '{file_path}'.")
+        else:
+            response = agent.process_message(text_input=user_input)
+            print(f"Агент: {response}")
+
+    print("\n--- Полная история чата ---")
+    # Дополнительная обработка для более читабельного вывода tool_calls и tool_output в истории
+    for msg in agent.memory.get_history():
+        if msg["role"] == "assistant" and isinstance(msg["content"], str) and "tool_calls" in msg["content"]:
+            try:
+                content_obj = json.loads(msg["content"])
+                if "tool_calls" in content_obj:
+                    print(f"assistant (вызов инструмента): {json.dumps(content_obj['tool_calls'], indent=2, ensure_ascii=False)}")
+                else: # Если content содержит tool_calls, но невалидный JSON, или не tool_calls
+                    print(f"{msg['role']}: {msg['content']}")
+            except json.JSONDecodeError:
+                print(f"{msg['role']}: {msg['content']}") # Если assistant content не JSON
+        elif msg["role"] == "tool" and isinstance(msg["content"], str):
+             try:
+                content_obj = json.loads(msg["content"])
+                # Вывод результата инструмента
+                print(f"tool (результат): Tool ID: {content_obj.get('tool_call_id', 'N/A')}, Output: {json.dumps(content_obj.get('output', ''), indent=2, ensure_ascii=False)}")
+             except json.JSONDecodeError:
+                print(f"{msg['role']}: {msg['content']}") # Если tool content не JSON
+        else:
+            print(f"{msg['role']}: {msg['content']}")
+
+    # Очистка ChromaDB для следующего запуска (раскомментируйте, если хотите очищать данные при каждом запуске)
+    # my_vector_store.clear() 
