@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 # Импортируем все необходимые классы
 from implementations.llms.simple_inference_llm import SimpleInferenceLLM
 from implementations.llms.openai_llm import OpenAI_LLM 
+from implementations.llms.openrouter_llm import OpenRouter_LLM # <--- НОВЫЙ ИМПОРТ
 
 from implementations.tools.calculator_tool import CalculatorTool
 from implementations.tools.web_search_tool import GoogleCSESearchTool 
@@ -12,7 +13,7 @@ from implementations.tools.web_search_tool import GoogleCSESearchTool
 from implementations.memory.chat_history_memory import ChatHistoryMemory
 
 from implementations.vector_stores.chromadb_store import ChromaDBStore 
-from implementations.vector_stores.supabase_store import SupabaseVectorStore # <--- НОВЫЙ ИМПОРТ
+from implementations.vector_stores.supabase_store import SupabaseVectorStore 
 
 from core.agent import AIAgent
 
@@ -20,19 +21,20 @@ if __name__ == "__main__":
     load_dotenv() 
 
     # 1. Инициализация компонентов
-    my_llm = OpenAI_LLM(model_name="gpt-3.5-turbo") 
+    # --- Выбор LLM ---
     # my_llm = SimpleInferenceLLM(model_name="GPT-Dummy-3.5") 
+    # my_llm = OpenAI_LLM(model_name="gpt-3.5-turbo") 
+    
+    # Вариант 1: OpenRouter с ключами из .env (рекомендуется)
+    my_llm = OpenRouter_LLM(model_name="qwen/qwen3-coder:free") 
+    
+
 
     my_memory = ChatHistoryMemory()
     
     # --- Выбор векторного хранилища ---
-    # Раскомментируйте один из следующих вариантов:
-
-    # Вариант 1: Использовать ChromaDB (in-memory или persistent)
     # my_vector_store = ChromaDBStore(llm_for_embedding=my_llm) 
     # my_vector_store = ChromaDBStore(llm_for_embedding=my_llm, persist_directory="./chroma_data")
-
-    # Вариант 2: Использовать Supabase (требует настройки .env и создания таблицы в Supabase)
     my_vector_store = SupabaseVectorStore(llm_for_embedding=my_llm) 
     # -----------------------------------
 
@@ -48,6 +50,7 @@ if __name__ == "__main__":
         "Будь готов использовать функцию `google_cse_search` для поиска актуальной информации в интернете, когда это необходимо." 
         "Особенно используй `google_cse_search`, если вопрос касается текущих событий, статистических данных или общих фактов, отсутствующих в твоей памяти."
         "Если пользователь просит проанализировать файл, ожидай, что содержание файла будет передано тебе как часть user-сообщения, и ты должен его проанализировать."
+        "Ты используешь модель OpenRouter для генерации ответов." # <--- Можно добавить эту фразу
     )
 
     # 3. Создание агента с системным промптом
@@ -58,12 +61,6 @@ if __name__ == "__main__":
     agent.register_tool(GoogleCSESearchTool()) 
 
     # 5. Добавление документов в векторное хранилище для демонстрации RAG 
-    # Внимание: если вы переключаетесь между ChromaDB и Supabase,
-    # и у вас persistent ChromaDB, то данные будут сохраняться.
-    # Для Supabase, данные будут сохраняться в вашей БД, пока вы их не очистите вручную
-    # или через my_vector_store.clear().
-    
-    # Рекомендуется очищать хранилище при запуске для тестов
     my_vector_store.clear() # Очистка данных перед добавлением для чистоты эксперимента
     
     agent.vector_store.add_documents([
@@ -120,6 +117,3 @@ if __name__ == "__main__":
                 print(f"{msg['role']}: {msg['content']}")
         else:
             print(f"{msg['role']}: {msg['content']}")
-
-    # Очистка ChromaDB / Supabase данных при завершении (раскомментируйте, если хотите очищать данные при каждом выходе)
-    my_vector_store.clear()
