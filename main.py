@@ -1,8 +1,8 @@
 import os
-import json # Добавлен для удобного вывода содержимого tool_calls
+import json 
 from dotenv import load_dotenv
 
-# Импортируем все необходимые классы из их новых местоположений
+# Импортируем все необходимые классы
 from implementations.llms.simple_inference_llm import SimpleInferenceLLM
 from implementations.llms.openai_llm import OpenAI_LLM 
 
@@ -11,25 +11,30 @@ from implementations.tools.web_search_tool import GoogleCSESearchTool
 
 from implementations.memory.chat_history_memory import ChatHistoryMemory
 
-from implementations.vector_stores.chromadb_store import ChromaDBStore
+from implementations.vector_stores.chromadb_store import ChromaDBStore 
+from implementations.vector_stores.supabase_store import SupabaseVectorStore # <--- НОВЫЙ ИМПОРТ
 
 from core.agent import AIAgent
 
 if __name__ == "__main__":
-    load_dotenv() # Загружаем переменные окружения (для OpenAI API Key, Google CSE API Key)
+    load_dotenv() 
 
     # 1. Инициализация компонентов
-    # Выберите LLM:
-    # my_llm = SimpleInferenceLLM(model_name="GPT-Dummy-3.5") # Используйте эту, если нет API ключа OpenAI или для быстрого теста без внешних вызовов
-    my_llm = OpenAI_LLM(model_name="gpt-3.5-turbo") # Рекомендуется для реального тестирования функций агента (требует API ключа OpenAI)
+    my_llm = OpenAI_LLM(model_name="gpt-3.5-turbo") 
+    # my_llm = SimpleInferenceLLM(model_name="GPT-Dummy-3.5") 
 
     my_memory = ChatHistoryMemory()
     
-    # Инициализация ChromaDBStore:
-    # Можно указать persist_directory для сохранения данных между запусками:
+    # --- Выбор векторного хранилища ---
+    # Раскомментируйте один из следующих вариантов:
+
+    # Вариант 1: Использовать ChromaDB (in-memory или persistent)
+    # my_vector_store = ChromaDBStore(llm_for_embedding=my_llm) 
     # my_vector_store = ChromaDBStore(llm_for_embedding=my_llm, persist_directory="./chroma_data")
-    # Для интерактивного тестирования, in-memory может быть удобнее (данные очищаются при перезапуске):
-    my_vector_store = ChromaDBStore(llm_for_embedding=my_llm) 
+
+    # Вариант 2: Использовать Supabase (требует настройки .env и создания таблицы в Supabase)
+    my_vector_store = SupabaseVectorStore(llm_for_embedding=my_llm) 
+    # -----------------------------------
 
     # 2. Определение системного промпта
     system_prompt = (
@@ -52,10 +57,15 @@ if __name__ == "__main__":
     agent.register_tool(CalculatorTool())
     agent.register_tool(GoogleCSESearchTool()) 
 
-    # 5. Добавление документов в векторное хранилище для демонстрации RAG (Retrieval Augmented Generation)
-    # Если вы используете persistent ChromaDB (persist_directory), вы можете закомментировать
-    # my_vector_store.clear() чтобы данные сохранялись между запусками.
-    # my_vector_store.clear() 
+    # 5. Добавление документов в векторное хранилище для демонстрации RAG 
+    # Внимание: если вы переключаетесь между ChromaDB и Supabase,
+    # и у вас persistent ChromaDB, то данные будут сохраняться.
+    # Для Supabase, данные будут сохраняться в вашей БД, пока вы их не очистите вручную
+    # или через my_vector_store.clear().
+    
+    # Рекомендуется очищать хранилище при запуске для тестов
+    my_vector_store.clear() # Очистка данных перед добавлением для чистоты эксперимента
+    
     agent.vector_store.add_documents([
         "Мое любимое хобби - это чтение книг по истории и философия.",
         "Я живу в городе Москва, работаю инженером в IT-компании, мой адрес: ул. Пушкина, 10.",
@@ -92,26 +102,24 @@ if __name__ == "__main__":
             print(f"Агент: {response}")
 
     print("\n--- Полная история чата ---")
-    # Дополнительная обработка для более читабельного вывода tool_calls и tool_output в истории
     for msg in agent.memory.get_history():
         if msg["role"] == "assistant" and isinstance(msg["content"], str) and "tool_calls" in msg["content"]:
             try:
                 content_obj = json.loads(msg["content"])
                 if "tool_calls" in content_obj:
                     print(f"assistant (вызов инструмента): {json.dumps(content_obj['tool_calls'], indent=2, ensure_ascii=False)}")
-                else: # Если content содержит tool_calls, но невалидный JSON, или не tool_calls
+                else: 
                     print(f"{msg['role']}: {msg['content']}")
             except json.JSONDecodeError:
-                print(f"{msg['role']}: {msg['content']}") # Если assistant content не JSON
+                print(f"{msg['role']}: {msg['content']}")
         elif msg["role"] == "tool" and isinstance(msg["content"], str):
              try:
                 content_obj = json.loads(msg["content"])
-                # Вывод результата инструмента
                 print(f"tool (результат): Tool ID: {content_obj.get('tool_call_id', 'N/A')}, Output: {json.dumps(content_obj.get('output', ''), indent=2, ensure_ascii=False)}")
              except json.JSONDecodeError:
-                print(f"{msg['role']}: {msg['content']}") # Если tool content не JSON
+                print(f"{msg['role']}: {msg['content']}")
         else:
             print(f"{msg['role']}: {msg['content']}")
 
-    # Очистка ChromaDB для следующего запуска (раскомментируйте, если хотите очищать данные при каждом запуске)
-    # my_vector_store.clear() 
+    # Очистка ChromaDB / Supabase данных при завершении (раскомментируйте, если хотите очищать данные при каждом выходе)
+    my_vector_store.clear()
