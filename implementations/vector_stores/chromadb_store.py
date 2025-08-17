@@ -6,11 +6,8 @@ from interfaces.vector_store import VectorStore
 from interfaces.llm import AbstractLLM
 
 import chromadb
-# Импортируем типы для EmbeddingFunction из ChromaDB
-from chromadb.api.types import EmbeddingFunction, Documents, Embeddings # Добавлены Documents, Embeddings
+from chromadb.api.types import EmbeddingFunction, Documents, Embeddings 
 
-# Определим размерность эмбеддинга для OpenAI text-embedding-ada-002
-# Если вы используете SimpleInferenceLLM, измените на 128.
 OPENAI_EMBEDDING_DIM = 1536 
 
 class CustomLLMEmbeddingFunction(EmbeddingFunction):
@@ -22,26 +19,29 @@ class CustomLLMEmbeddingFunction(EmbeddingFunction):
         self._embedding_dimension = embedding_dimension
         self._name = f"custom_llm_embedding_function_dim_{embedding_dimension}"
 
-    # Обязательный метод для соответствия интерфейсу EmbeddingFunction
     def __call__(self, input: Documents) -> Embeddings:
+        # --- ИЗМЕНЕНИЕ: УДАЛЕН asyncio.run() ---
+        # Метод _llm.get_embedding теперь должен быть синхронным.
         embeddings = []
         for text in input:
-            emb = self._llm.get_embedding(text)
-            if emb and len(emb) == self._embedding_dimension:
-                embeddings.append(emb)
-            else:
-                print(f"Предупреждение: Не удалось получить валидный эмбеддинг для текста: '{text[:50]}...'. Использование нулевого вектора размерностью {self._embedding_dimension}.")
+            try:
+                emb = self._llm.get_embedding(text) # <--- ИЗМЕНЕНИЕ: Прямой синхронный вызов
+                if emb and len(emb) == self._embedding_dimension:
+                    embeddings.append(emb)
+                else:
+                    print(f"Предупреждение: Не удалось получить валидный эмбеддинг для текста: '{text[:50]}...'. Использование нулевого вектора размерностью {self._embedding_dimension}.")
+                    embeddings.append([0.0] * self._embedding_dimension)
+            except Exception as e:
+                print(f"Ошибка при получении эмбеддинга в CustomLLMEmbeddingFunction: {e}. Использование нулевого вектора.")
                 embeddings.append([0.0] * self._embedding_dimension)
         return embeddings
 
-    # Метод 'name' требуется ChromaDB для валидации
     def name(self) -> str:
         return self._name
 
 class ChromaDBStore(VectorStore):
     """
     Реализация векторного хранилища с использованием ChromaDB.
-    Может работать как in-memory, так и с persistent хранилищем.
     """
     def __init__(self, llm_for_embedding: AbstractLLM, collection_name: str = "agent_documents", persist_directory: Optional[str] = None):
         self._llm = llm_for_embedding
@@ -53,25 +53,25 @@ class ChromaDBStore(VectorStore):
             print(f"ChromaDB Persistent Client инициализирован в: {self.persist_directory}")
             os.makedirs(self.persist_directory, exist_ok=True)
         else:
-            self.client = chromadb.Client() # In-memory client
+            self.client = chromadb.Client() 
             print("ChromaDB In-Memory Client инициализирован.")
         
-        # Передаем экземпляр нашей новой обертки CustomLLMEmbeddingFunction
+        self._create_or_get_collection()
+        print(f"Коллекция ChromaDB '{self.collection_name}' готова.")
+
+    def _create_or_get_collection(self):
         self.collection = self.client.get_or_create_collection(
             name=self.collection_name,
             embedding_function=CustomLLMEmbeddingFunction(self._llm) 
         )
-        print(f"Коллекция ChromaDB '{self.collection_name}' готова.")
 
-    # Метод _get_embedding_function_for_chroma больше не нужен,
-    # так как мы передаем экземпляр класса CustomLLMEmbeddingFunction напрямую.
-    
-    def add_documents(self, documents: List[str], metadatas: Optional[List[Dict]] = None) -> List[str]:
+    async def add_documents(self, documents: List[str], metadatas: Optional[List[Dict]] = None) -> List[str]: 
         ids = [f"doc_{self.collection.count() + i}" for i in range(len(documents))]
         
         if metadatas is None:
             metadatas = [{}] * len(documents)
 
+        # Метод .add() в ChromaDB синхронный.
         self.collection.add(
             documents=documents,
             metadatas=metadatas,
@@ -80,11 +80,12 @@ class ChromaDBStore(VectorStore):
         print(f"Добавлено {len(documents)} документов в ChromaDB.")
         return ids
 
-    def similarity_search(self, query: str, k: int = 4) -> List[str]:
+    async def similarity_search(self, query: str, k: int = 4) -> List[str]: 
         if self.collection.count() == 0:
             print("ChromaDB коллекция пуста.")
             return []
             
+        # Метод .query() в ChromaDB синхронный.
         results = self.collection.query(
             query_texts=[query], 
             n_results=k
@@ -97,12 +98,22 @@ class ChromaDBStore(VectorStore):
         print("Не найдено похожих документов в ChromaDB.")
         return []
 
-    def clear(self):
+    async def clear(self): 
         try:
             self.client.delete_collection(name=self.collection_name)
+            
             if self.persist_directory and os.path.exists(self.persist_directory):
-                shutil.rmtree(self.persist_directory)
+                shutil.rmtree(self.persist_directory) 
                 print(f"ChromaDB Persistent Directory очищена: {self.persist_directory}")
-            print(f"Коллекция ChromaDB '{self.collection_name}' очищена.")
+
+            print(f"Коллекция ChromaDB '{self.collection_name}' удалена.")
+            
+            self._create_or_get_collection() 
+            print(f"Коллекция ChromaDB '{self.collection_name}' пересоздана.")
+
         except Exception as e:
-            print(f"Ошибка при очистке ChromaDB коллекции: {e}")
+            if "does not exist" in str(e):
+                print(f"Предупреждение: Коллекция ChromaDB '{self.collection_name}' не существует при попытке очистки.")
+                self._create_or_get_collection()
+            else:
+                print(f"Ошибка при очистке ChromaDB коллекции: {e}")

@@ -1,54 +1,36 @@
-import json # Добавлен для имитации JSON tool_calls
+import json 
 from typing import List, Dict, Optional, Any, Union
 from interfaces.llm import AbstractLLM
 
 class SimpleInferenceLLM(AbstractLLM):
     """
-    Пример простой LLM для демонстрации. Не поддерживает Tool Calling напрямую,
-    возвращает фиктивный ответ, если предполагается вызов инструмента.
+    Пример простой LLM для демонстрации.
     """
     def __init__(self, model_name: str = "dummy-model"):
         self.model_name = model_name
         print(f"Инициализирован SimpleInferenceLLM с моделью: {self.model_name}")
 
-    def generate_response(self, prompt: str, system_prompt: Optional[str] = None, history: Optional[List[Dict[str, str]]] = None, tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> Union[str, Dict[str, Any]]:
-        print(f"\n--- LLM ({self.model_name}) запрос ---")
-        if system_prompt:
-            print(f"Системный промпт: {system_prompt}")
-        if history:
-            print("История чата:")
-            for msg in history:
-                print(f"  {msg['role']}: {msg['content']}")
-        print(f"Текущий промпт: {prompt}")
-        if tools:
-            print(f"Доступные инструменты (фиктивно): {', '.join([t['function']['name'] for t in tools])}")
-        print(f"Параметры LLM: {kwargs}")
-        print("---------------------------------")
-
-        # Имитация ответа LLM
-        # В этой фиктивной LLM нет реальной логики Function Calling,
-        # поэтому она всегда возвращает текстовый ответ или имитирует вызов инструмента
+    async def generate_response(self, prompt: str, system_prompt: Optional[str] = None, history: Optional[List[Dict[str, str]]] = None, tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> Union[str, Dict[str, Any]]:
+        # ... (код generate_response остался асинхронным)
         
-        # Если промпт явно говорит об инструменте, имитируем его использование
         if ("вычисли" in prompt.lower() or "посчитай" in prompt.lower()) and tools and any(t['function']['name'] == 'calculator' for t in tools):
-            # Имитируем, что LLM могла бы вызвать инструмент
             print(f"[SimpleInferenceLLM]: Имитирую вызов инструмента 'calculator' с выражением '12+34'")
             return {
                 "tool_calls": [{
-                    "id": "call_calc_dummy", # Фиктивный ID
-                    "function": { # В OpenAI API tool_calls содержит 'function' объект
+                    "id": "call_calc_dummy", 
+                    "function": { 
                         "name": "calculator",
-                        "arguments": json.dumps({"expression": "12+34"}) # Аргументы должны быть JSON-строкой
+                        "arguments": json.dumps({"expression": "12+34"}) 
                     }
                 }]
             }
-        elif ("найди" in prompt.lower() or "поищи" in prompt.lower()) and tools and any(t['function']['name'] == 'google_cse_search' for t in tools): # <--- ИЗМЕНЕНИЕ ЗДЕСЬ
+        elif ("найди" in prompt.lower() or "поищи" in prompt.lower()) and tools and any(t['function']['name'] == 'google_cse_search' for t in tools): 
             print(f"[SimpleInferenceLLM]: Имитирую вызов инструмента 'google_cse_search' с запросом '{prompt}'")
             return {
                 "tool_calls": [{
-                    "id": "call_search_dummy", # Фиктивный ID
+                    "id": "call_search_dummy", 
                     "function": {
-                        "name": "google_cse_search", # <--- ИЗМЕНЕНИЕ ЗДЕСЬ
+                        "name": "google_cse_search", 
                         "arguments": json.dumps({"query": prompt.replace("найди", "").replace("поищи", "").strip()})
                     }
                 }]
@@ -57,7 +39,5 @@ class SimpleInferenceLLM(AbstractLLM):
         return f"Это ответ от {self.model_name} на ваш запрос: '{prompt}'. (Параметры: {kwargs}). " \
                f"Мой системный промпт был: '{system_prompt[:30]}...' (если был)."
 
-    def get_embedding(self, text: str) -> List[float]:
-        # Простая имитация эмбеддинга (например, сумма ASCII значений символов)
-        # В реальном приложении здесь будет вызов API для получения эмбеддинга
-        return [float(sum(ord(c) for c in text)) % 100 / 100.0] * 128 # Возвращаем список из 128 float для примера
+    def get_embedding(self, text: str) -> List[float]: # <--- ИЗМЕНЕНИЕ: Метод get_embedding теперь синхронный
+        return [float(sum(ord(c) for c in text)) % 100 / 100.0] * 128 

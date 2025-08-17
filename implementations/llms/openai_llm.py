@@ -2,7 +2,7 @@ import os
 import json 
 from typing import List, Dict, Optional, Any, Union
 from interfaces.llm import AbstractLLM
-from openai import OpenAI
+from openai import OpenAI, AsyncOpenAI # <--- ИЗМЕНЕНИЕ: Импортируем оба клиента
 from openai.types.chat import (
     ChatCompletionMessageToolCall,
     ChatCompletionMessageParam, 
@@ -18,11 +18,14 @@ class OpenAI_LLM(AbstractLLM):
         self.api_key = api_key if api_key else os.getenv("OPENAI_API_KEY")
         if not self.api_key:
             raise ValueError("OPENAI_API_KEY не установлен. Пожалуйста, установите его как переменную окружения или передайте в конструктор.")
-        self.client = OpenAI(api_key=self.api_key)
+        
+        self.async_client = AsyncOpenAI(api_key=self.api_key) # <--- ИЗМЕНЕНИЕ: Асинхронный клиент для generate_response
+        self.sync_client = OpenAI(api_key=self.api_key) # <--- НОВЫЙ: Синхронный клиент для get_embedding
+
         self.model_name = model_name
         print(f"Инициализирован OpenAI_LLM с моделью: {self.model_name}")
 
-    def generate_response(self, prompt: str, system_prompt: Optional[str] = None, history: Optional[List[Dict[str, str]]] = None, tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> Union[str, Dict[str, Any]]:
+    async def generate_response(self, prompt: str, system_prompt: Optional[str] = None, history: Optional[List[Dict[str, str]]] = None, tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> Union[str, Dict[str, Any]]:
         messages: List[ChatCompletionMessageParam] = []
 
         if system_prompt:
@@ -54,21 +57,10 @@ class OpenAI_LLM(AbstractLLM):
                             messages.append({"role": "assistant", "content": msg["content"]})
                     except (json.JSONDecodeError, KeyError):
                         messages.append({"role": "assistant", "content": msg["content"]})
-                # --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
-                # Мы больше не добавляем 'file_content' как отдельную роль.
-                # Вместо этого, логика в agent.py добавит содержимое файла как user-prompt.
-                elif msg["role"] == "user": # Остальные роли, включая 'user', добавляются напрямую
+                elif msg["role"] == "user": 
                     messages.append({"role": "user", "content": msg["content"]})
-                # Мы также можем игнорировать 'system_error' в history для OpenAI,
-                # так как они не являются частью стандартных ролей диалога
-                # или обрабатывать их как "system" сообщения, если это применимо к контексту LLM.
-                # Для простоты, пока просто не добавляем их.
-                # else: 
-                #     # Если есть другие роли, которые не должны идти в OpenAI API,
-                #     # их можно пропустить или преобразовать.
-                #     pass 
 
-        messages.append({"role": "user", "content": prompt}) # Текущий промпт пользователя, который может быть и содержимым файла
+        messages.append({"role": "user", "content": prompt})
         
         openai_tools: Optional[List[ChatCompletionToolParam]] = None
         if tools:
@@ -95,7 +87,7 @@ class OpenAI_LLM(AbstractLLM):
             api_params["tool_choice"] = "auto"
 
         try:
-            response = self.client.chat.completions.create(**api_params)
+            response = await self.async_client.chat.completions.create(**api_params) # <--- ИЗМЕНЕНИЕ: Используем async_client
             
             tool_calls = response.choices[0].message.tool_calls
             if tool_calls:
@@ -114,9 +106,9 @@ class OpenAI_LLM(AbstractLLM):
             print(f"Ошибка при вызове OpenAI LLM: {e}")
             return f"Извините, произошла ошибка при генерации ответа: {e}"
 
-    def get_embedding(self, text: str) -> List[float]:
+    def get_embedding(self, text: str) -> List[float]: # <--- ИЗМЕНЕНИЕ: Метод get_embedding теперь синхронный
         try:
-            response = self.client.embeddings.create(
+            response = self.sync_client.embeddings.create( # <--- ИЗМЕНЕНИЕ: Используем sync_client
                 input=[text],
                 model="text-embedding-ada-002"
             )

@@ -1,5 +1,5 @@
 import os
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional, Any, Tuple, Callable 
 from interfaces.vector_store import VectorStore
 from interfaces.llm import AbstractLLM
 
@@ -27,14 +27,14 @@ class SupabaseVectorStore(VectorStore):
         except Exception as e:
             raise ConnectionError(f"Не удалось подключиться к Supabase: {e}")
 
-    def add_documents(self, documents: List[str], metadatas: Optional[List[Dict]] = None) -> List[str]:
+    async def add_documents(self, documents: List[str], metadatas: Optional[List[Dict]] = None) -> List[str]: 
         if not documents:
             return []
 
         data_to_insert = []
 
         for i, doc_content in enumerate(documents):
-            embedding = self._llm.get_embedding(doc_content)
+            embedding = self._llm.get_embedding(doc_content) 
             if not embedding or len(embedding) != OPENAI_EMBEDDING_DIM:
                 print(f"Предупреждение: Не удалось получить валидный эмбеддинг для документа: '{doc_content[:50]}...'. Пропуск документа.")
                 continue
@@ -42,7 +42,7 @@ class SupabaseVectorStore(VectorStore):
             entry = {
                 "content": doc_content,
                 "embedding": embedding,
-                "metadata": metadatas[i] if metadatas and i < len(metadatas) else {} # Добавляем метаданные
+                "metadata": metadatas[i] if metadatas and i < len(metadatas) else {} 
             }
             data_to_insert.append(entry)
 
@@ -50,35 +50,29 @@ class SupabaseVectorStore(VectorStore):
             return []
 
         try:
-            # При вставке, если ID bigserial, мы не указываем его, БД сгенерирует автоматически
-            response = self.client.from_(self.table_name).insert(data_to_insert).execute()
-            # Supabase Python SDK не возвращает ID для bigserial при "returning=minimal"
-            # Для получения ID нужно либо изменить SQL insert, либо выполнить отдельный SELECT
-            # Для простоты, здесь мы просто возвращаем пустой список IDs или заглушки.
-            # Если вам реально нужны ID, нужно будет запросить их после вставки.
-            # Пока просто возвращаем заглушки, так как функционал не зависит от конкретных ID
-            inserted_ids = [f"temp_id_{i}" for i in range(len(data_to_insert))] 
+            # --- ИЗМЕНЕНИЕ: УДАЛЕН await ---
+            response = self.client.from_(self.table_name).insert(data_to_insert).execute() 
+            inserted_ids = [item['id'] for item in response.data] if response.data else [] 
             print(f"Добавлено {len(inserted_ids)} документов в Supabase таблицу '{self.table_name}'.")
             return inserted_ids
         except Exception as e:
             print(f"Ошибка при добавлении документов в Supabase: {e}")
             return []
 
-    def similarity_search(self, query: str, k: int = 4, filters: Optional[Dict] = None) -> List[str]:
-        query_embedding = self._llm.get_embedding(query)
+    async def similarity_search(self, query: str, k: int = 4, filters: Optional[Dict] = None) -> List[str]: 
+        query_embedding = self._llm.get_embedding(query) 
         if not query_embedding or len(query_embedding) != OPENAI_EMBEDDING_DIM:
             print("Не удалось получить валидный эмбеддинг для запроса. Поиск невозможен.")
             return []
 
         try:
-            # --- ИЗМЕНЕНИЕ: Используем вашу SQL-функцию match_documents ---
-            # Ваша функция match_documents принимает match_count и filter
-            response = self.client.rpc(
+            # --- ИЗМЕНЕНИЕ: УДАЛЕН await ---
+            response = self.client.rpc( 
                 'match_documents', 
                 {
                     'query_embedding': query_embedding,
                     'match_count': k,
-                    'filter': filters if filters else {} # Передаем фильтры метаданных
+                    'filter': filters if filters else {} 
                 }
             ).execute()
             
@@ -92,12 +86,10 @@ class SupabaseVectorStore(VectorStore):
             print(f"Ошибка при поиске по схожести в Supabase: {e}")
             return []
 
-    def clear(self):
+    async def clear(self): # <--- ИЗМЕНЕНИЕ: Метод clear() остается асинхронным, но await внутри удален
         try:
-            # --- ИЗМЕНЕНИЕ: Исправлен метод clear() для bigint ID ---
-            # Самый простой способ удалить все записи:
-            response = self.client.from_(self.table_name).delete().gt("id", 0).execute()
-            # Это удалит все строки, где ID > 0 (что справедливо для bigserial)
+            # --- ИЗМЕНЕНИЕ: УДАЛЕН await ---
+            response = self.client.from_(self.table_name).delete().gt("id", 0).execute() 
             
             print(f"Очищена таблица Supabase '{self.table_name}'.")
         except Exception as e:

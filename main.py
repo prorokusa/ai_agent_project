@@ -1,11 +1,12 @@
 import os
 import json 
+import asyncio 
 from dotenv import load_dotenv
 
 # Импортируем все необходимые классы
 from implementations.llms.simple_inference_llm import SimpleInferenceLLM
 from implementations.llms.openai_llm import OpenAI_LLM 
-from implementations.llms.openrouter_llm import OpenRouter_LLM # <--- НОВЫЙ ИМПОРТ
+from implementations.llms.openrouter_llm import OpenRouter_LLM 
 
 from implementations.tools.calculator_tool import CalculatorTool
 from implementations.tools.web_search_tool import GoogleCSESearchTool 
@@ -15,30 +16,39 @@ from implementations.memory.chat_history_memory import ChatHistoryMemory
 from implementations.vector_stores.chromadb_store import ChromaDBStore 
 from implementations.vector_stores.supabase_store import SupabaseVectorStore 
 
-from core.agent import AIAgent
+from core.agent import AIAgent, AgentContext 
+from core.agent import AgentProcessor 
 
-if __name__ == "__main__":
+# Пример пользовательского плагина (middleware)
+async def my_custom_pre_llm_processor(agent: AIAgent, context: AgentContext):
+    print(f"\n[PLUGIN: pre_llm] Выполняется перед запросом LLM...")
+    import datetime
+    current_date = datetime.date.today().strftime("%Y-%m-%d")
+    context.current_prompt_for_llm = f"Сегодня {current_date}. " + context.current_prompt_for_llm
+    context.metadata["current_date"] = current_date
+    print(f"[PLUGIN: pre_llm] Добавлена дата в промпт: {context.current_prompt_for_llm[:50]}...")
+
+async def my_custom_final_response_processor(agent: AIAgent, context: AgentContext):
+    print(f"\n[PLUGIN: final_response] Получен окончательный ответ агента.")
+    if context.processed_successfully:
+        print(f"[PLUGIN: final_response] Ответ успешный. Сообщение: {context.final_response[:50]}...")
+    else:
+        print(f"[PLUGIN: final_response] Ответ содержит ошибку. Ошибка: {context.error_message}")
+    print(f"[PLUGIN: final_response] Метаданные контекста: {context.metadata}")
+
+
+async def main(): 
     load_dotenv() 
 
-    # 1. Инициализация компонентов
-    # --- Выбор LLM ---
-    # my_llm = SimpleInferenceLLM(model_name="GPT-Dummy-3.5") 
-    # my_llm = OpenAI_LLM(model_name="gpt-3.5-turbo") 
-    
-    # Вариант 1: OpenRouter с ключами из .env (рекомендуется)
     my_llm = OpenRouter_LLM(model_name="qwen/qwen3-coder:free") 
-    
-
+    # my_llm = OpenAI_LLM(model_name="gpt-3.5-turbo") 
 
     my_memory = ChatHistoryMemory()
     
-    # --- Выбор векторного хранилища ---
     # my_vector_store = ChromaDBStore(llm_for_embedding=my_llm) 
     # my_vector_store = ChromaDBStore(llm_for_embedding=my_llm, persist_directory="./chroma_data")
     my_vector_store = SupabaseVectorStore(llm_for_embedding=my_llm) 
-    # -----------------------------------
 
-    # 2. Определение системного промпта
     system_prompt = (
         "Ты очень полезный, дружелюбный и компетентный AI ассистент. "
         "Твоя задача - точно отвечать на вопросы, использовать предоставленные инструменты, когда это уместно, "
@@ -50,20 +60,21 @@ if __name__ == "__main__":
         "Будь готов использовать функцию `google_cse_search` для поиска актуальной информации в интернете, когда это необходимо." 
         "Особенно используй `google_cse_search`, если вопрос касается текущих событий, статистических данных или общих фактов, отсутствующих в твоей памяти."
         "Если пользователь просит проанализировать файл, ожидай, что содержание файла будет передано тебе как часть user-сообщения, и ты должен его проанализировать."
-        "Ты используешь модель OpenRouter для генерации ответов." # <--- Можно добавить эту фразу
+        "Ты используешь модель OpenRouter для генерации ответов."
+        "После выполнения инструмента, **всегда** включай его результат (если он является ответом на вопрос пользователя) в свой финальный ответ. Формулируй ответ пользователю ясно, кратко и дружелюбно, прямо отвечая на его исходный вопрос, используя полученные данные." 
     )
 
-    # 3. Создание агента с системным промптом
     agent = AIAgent(llm=my_llm, memory=my_memory, vector_store=my_vector_store, system_prompt=system_prompt)
 
-    # 4. Регистрация инструментов
+    # agent.register_processor('pre_llm', my_custom_pre_llm_processor)
+    # agent.register_processor('final_response', my_custom_final_response_processor)
+
     agent.register_tool(CalculatorTool())
     agent.register_tool(GoogleCSESearchTool()) 
 
-    # 5. Добавление документов в векторное хранилище для демонстрации RAG 
-    my_vector_store.clear() # Очистка данных перед добавлением для чистоты эксперимента
+    await my_vector_store.clear() 
     
-    agent.vector_store.add_documents([
+    await agent.vector_store.add_documents([ 
         "Мое любимое хобби - это чтение книг по истории и философия.",
         "Я живу в городе Москва, работаю инженером в IT-компании, мой адрес: ул. Пушкина, 10.",
         "Последний раз мы обсуждали планы на отпуск в горах Кавказа в июле 2024 года.",
@@ -90,12 +101,12 @@ if __name__ == "__main__":
         if user_input.lower().startswith("file:"):
             file_path = user_input[len("file:"):].strip()
             if os.path.exists(file_path):
-                response = agent.process_message(file_input=file_path)
+                response = await agent.process_message(file_input=file_path) 
                 print(f"Агент (обработка файла): {response}")
             else:
                 print(f"Ошибка: Файл не найден по пути '{file_path}'.")
         else:
-            response = agent.process_message(text_input=user_input)
+            response = await agent.process_message(text_input=user_input) 
             print(f"Агент: {response}")
 
     print("\n--- Полная история чата ---")
@@ -117,3 +128,6 @@ if __name__ == "__main__":
                 print(f"{msg['role']}: {msg['content']}")
         else:
             print(f"{msg['role']}: {msg['content']}")
+
+if __name__ == "__main__":
+    asyncio.run(main())

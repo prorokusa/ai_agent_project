@@ -1,9 +1,9 @@
 import os
 import json
-import itertools # Для ротации ключей
+import itertools 
 from typing import List, Dict, Optional, Any, Union
 from interfaces.llm import AbstractLLM
-from openai import OpenAI
+from openai import OpenAI, AsyncOpenAI # <--- ИЗМЕНЕНИЕ: Импортируем оба клиента
 from openai.types.chat import (
     ChatCompletionMessageToolCall,
     ChatCompletionMessageParam,
@@ -27,7 +27,6 @@ class OpenRouter_LLM(AbstractLLM):
         elif isinstance(api_keys, list):
             self.api_keys = api_keys
         else:
-            # Попробуем получить ключи из переменной окружения
             env_keys_str = os.getenv("OPENROUTER_API_KEYS")
             if env_keys_str:
                 self.api_keys = [k.strip() for k in env_keys_str.split(',')]
@@ -37,21 +36,28 @@ class OpenRouter_LLM(AbstractLLM):
         if not self.api_keys:
             raise ValueError("Список ключей OpenRouter API пуст.")
         
-        # Создаем итератор для бесконечной ротации ключей
         self._api_key_iterator = itertools.cycle(self.api_keys)
-        
-        # Клиент OpenAI будет создаваться для каждого запроса с новым ключом.
-        # base_url всегда будет OpenRouter
         self.base_url = "https://openrouter.ai/api/v1/"
+        
+        # Для generate_response (async)
+        # Клиент AsyncOpenAI будет создаваться для каждого запроса с новым ключом.
+
+        # Для get_embedding (sync)
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not openai_api_key:
+            print("Предупреждение: OPENAI_API_KEY не установлен. Эмбеддинги не могут быть сгенерированы.")
+            self.embedding_client = None # <--- ИЗМЕНЕНИЕ
+        else:
+            self.embedding_client = OpenAI(api_key=openai_api_key) # <--- ИЗМЕНЕНИЕ: Синхронный клиент для эмбеддингов
         
         print(f"Инициализирован OpenRouter_LLM с моделью: {self.model_name} и {len(self.api_keys)} ключами OpenRouter.")
 
-    def _get_current_client(self) -> OpenAI:
-        """Возвращает новый клиент OpenAI с текущим ключом из ротации."""
+    def _get_current_client(self) -> AsyncOpenAI: 
+        """Возвращает новый клиент AsyncOpenAI с текущим ключом из ротации."""
         current_key = next(self._api_key_iterator)
-        return OpenAI(base_url=self.base_url, api_key=current_key)
+        return AsyncOpenAI(base_url=self.base_url, api_key=current_key) 
 
-    def generate_response(self, prompt: str, system_prompt: Optional[str] = None, history: Optional[List[Dict[str, str]]] = None, tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> Union[str, Dict[str, Any]]:
+    async def generate_response(self, prompt: str, system_prompt: Optional[str] = None, history: Optional[List[Dict[str, str]]] = None, tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> Union[str, Dict[str, Any]]:
         messages: List[ChatCompletionMessageParam] = []
 
         if system_prompt:
@@ -113,8 +119,8 @@ class OpenRouter_LLM(AbstractLLM):
             api_params["tool_choice"] = "auto"
 
         try:
-            client = self._get_current_client() # Получаем клиент с ротированным ключом
-            response = client.chat.completions.create(**api_params)
+            client = self._get_current_client() 
+            response = await client.chat.completions.create(**api_params) 
             
             tool_calls = response.choices[0].message.tool_calls
             if tool_calls:
@@ -133,37 +139,15 @@ class OpenRouter_LLM(AbstractLLM):
             print(f"Ошибка при вызове OpenRouter LLM: {e}")
             return f"Извините, произошла ошибка при генерации ответа: {e}"
 
-    def get_embedding(self, text: str) -> List[float]:
-        """
-        OpenRouter не предоставляет единый эндпоинт для эмбеддингов, совместимый с OpenAI API.
-        Для получения эмбеддингов через OpenRouter, вам нужно будет использовать
-        LLM, которая поддерживает эмбеддинги (например, text-embedding-ada-002)
-        через OpenAI API. Поэтому для этой функции мы используем отдельный клиент OpenAI.
-        """
-        # Если ваша LLM (например, OpenAI) уже умеет делать эмбеддинги,
-        # вы можете использовать ее клиент напрямую или передать ей ключи.
-        # Но OpenRouter не гарантирует, что любая модель через их API будет работать для эмбеддингов.
-        # Поэтому, для надежности, мы будем использовать OpenAI для эмбеддингов, если ключ доступен.
-        
-        # Если вы хотите использовать OpenRouter для эмбеддингов, вам нужно выбрать
-        # модель, которая их поддерживает, и адаптировать вызов API.
-        # Например, некоторые модели на OpenRouter могут быть способны генерировать эмбеддинги
-        # при специальном промпте, но это не стандартный get_embedding() вызов.
-
-        # В данной реализации мы оставим это так, чтобы эмбеддинги по-прежнему брались от OpenAI,
-        # поскольку это более надежный подход для векторного хранилища.
-        openai_api_key = os.getenv("OPENAI_API_KEY")
-        if not openai_api_key:
-            print("Предупреждение: OPENAI_API_KEY не установлен. Эмбеддинги не могут быть сгенерированы.")
+    def get_embedding(self, text: str) -> List[float]: # <--- ИЗМЕНЕНИЕ: Метод get_embedding теперь синхронный
+        if not self.embedding_client:
+            print("Предупреждение: Клиент для эмбеддингов не инициализирован (OPENAI_API_KEY отсутствует).")
             return []
         
-        # Создаем временный клиент OpenAI для эмбеддингов
-        embedding_client = OpenAI(api_key=openai_api_key)
-        
         try:
-            response = embedding_client.embeddings.create(
+            response = self.embedding_client.embeddings.create( # <--- ИЗМЕНЕНИЕ: Используем sync embedding_client
                 input=[text],
-                model="text-embedding-ada-002" # Модель для эмбеддингов
+                model="text-embedding-ada-002"
             )
             return response.data[0].embedding
         except Exception as e:
