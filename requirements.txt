@@ -7,3 +7,4 @@ typing-extensions
 supabase
 pydub
 soundfile
+httpx

@@ -1,5 +1,7 @@
+# implementations/vector_stores/chromadb_store.py
 import os
 import shutil
+# import time # Удаляем, так как это не помогает решить проблему блокировки
 from typing import List, Dict, Optional, Any, Callable
 
 from interfaces.vector_store import VectorStore
@@ -7,25 +9,22 @@ from interfaces.llm import AbstractLLM
 
 import chromadb
 from chromadb.api.types import EmbeddingFunction, Documents, Embeddings 
+from chromadb.errors import NotFoundError 
 
 OPENAI_EMBEDDING_DIM = 1536 
 
 class CustomLLMEmbeddingFunction(EmbeddingFunction):
-    """
-    Класс-обертка для использования нашей AbstractLLM как функции эмбеддинга ChromaDB.
-    """
+    # ... (остается без изменений) ...
     def __init__(self, llm: AbstractLLM, embedding_dimension: int = OPENAI_EMBEDDING_DIM):
         self._llm = llm
         self._embedding_dimension = embedding_dimension
         self._name = f"custom_llm_embedding_function_dim_{embedding_dimension}"
 
     def __call__(self, input: Documents) -> Embeddings:
-        # --- ИЗМЕНЕНИЕ: УДАЛЕН asyncio.run() ---
-        # Метод _llm.get_embedding теперь должен быть синхронным.
         embeddings = []
         for text in input:
             try:
-                emb = self._llm.get_embedding(text) # <--- ИЗМЕНЕНИЕ: Прямой синхронный вызов
+                emb = self._llm.get_embedding(text) 
                 if emb and len(emb) == self._embedding_dimension:
                     embeddings.append(emb)
                 else:
@@ -40,30 +39,39 @@ class CustomLLMEmbeddingFunction(EmbeddingFunction):
         return self._name
 
 class ChromaDBStore(VectorStore):
-    """
-    Реализация векторного хранилища с использованием ChromaDB.
-    """
     def __init__(self, llm_for_embedding: AbstractLLM, collection_name: str = "agent_documents", persist_directory: Optional[str] = None):
         self._llm = llm_for_embedding
         self.collection_name = collection_name
         self.persist_directory = persist_directory
 
         if self.persist_directory:
+            os.makedirs(self.persist_directory, exist_ok=True)
             self.client = chromadb.PersistentClient(path=self.persist_directory)
             print(f"ChromaDB Persistent Client инициализирован в: {self.persist_directory}")
-            os.makedirs(self.persist_directory, exist_ok=True)
         else:
             self.client = chromadb.Client() 
             print("ChromaDB In-Memory Client инициализирован.")
         
         self._create_or_get_collection()
+
         print(f"Коллекция ChromaDB '{self.collection_name}' готова.")
 
     def _create_or_get_collection(self):
-        self.collection = self.client.get_or_create_collection(
-            name=self.collection_name,
-            embedding_function=CustomLLMEmbeddingFunction(self._llm) 
-        )
+        try:
+            self.collection = self.client.get_collection(
+                name=self.collection_name,
+                embedding_function=CustomLLMEmbeddingFunction(self._llm)
+            )
+            print(f"Коллекция ChromaDB '{self.collection_name}' получена.")
+        except NotFoundError:
+            self.collection = self.client.create_collection(
+                name=self.collection_name,
+                embedding_function=CustomLLMEmbeddingFunction(self._llm)
+            )
+            print(f"Коллекция ChromaDB '{self.collection_name}' создана.")
+        except Exception as e:
+            print(f"Ошибка при инициализации/получении коллекции ChromaDB: {e}")
+            raise 
 
     async def add_documents(self, documents: List[str], metadatas: Optional[List[Dict]] = None) -> List[str]: 
         ids = [f"doc_{self.collection.count() + i}" for i in range(len(documents))]
@@ -71,7 +79,6 @@ class ChromaDBStore(VectorStore):
         if metadatas is None:
             metadatas = [{}] * len(documents)
 
-        # Метод .add() в ChromaDB синхронный.
         self.collection.add(
             documents=documents,
             metadatas=metadatas,
@@ -82,10 +89,9 @@ class ChromaDBStore(VectorStore):
 
     async def similarity_search(self, query: str, k: int = 4) -> List[str]: 
         if self.collection.count() == 0:
-            print("ChromaDB коллекция пуста.")
+            print(f"ChromaDB коллекция '{self.collection_name}' пуста.")
             return []
             
-        # Метод .query() в ChromaDB синхронный.
         results = self.collection.query(
             query_texts=[query], 
             n_results=k
@@ -95,25 +101,35 @@ class ChromaDBStore(VectorStore):
             found_docs = results['documents'][0]
             print(f"Найдено {len(found_docs)} похожих документов в ChromaDB.")
             return found_docs
-        print("Не найдено похожих документов в ChromaDB.")
+        print(f"Не найдено похожих документов в ChromaDB коллекции '{self.collection_name}'.")
         return []
 
     async def clear(self): 
         try:
+            # Сначала удаляем коллекцию
             self.client.delete_collection(name=self.collection_name)
-            
-            if self.persist_directory and os.path.exists(self.persist_directory):
-                shutil.rmtree(self.persist_directory) 
-                print(f"ChromaDB Persistent Directory очищена: {self.persist_directory}")
-
             print(f"Коллекция ChromaDB '{self.collection_name}' удалена.")
             
+            # Затем пытаемся удалить директорию, если она персистентная
+            if self.persist_directory and os.path.exists(self.persist_directory):
+                print(f"Попытка удалить директорию: {self.persist_directory}")
+                try:
+                    # ПОЛНОСТЬЮ УБИРАЕМ time.sleep(), т.к. это не решает проблему блокировки
+                    shutil.rmtree(self.persist_directory) 
+                    print(f"ChromaDB Persistent Directory очищена: {self.persist_directory}")
+                except OSError as e:
+                    # --- ИЗМЕНЕНИЕ ЗДЕСЬ: ЛОВИМ OSError И ПРОСТО ПРЕДУПРЕЖДАЕМ ---
+                    print(f"Предупреждение: Не удалось полностью очистить директорию '{self.persist_directory}': {e}. Файлы могут быть заблокированы. Продолжаем работу, но старые файлы могут остаться.")
+            
+            # После удаления, мы должны ПЕРЕИНИЦИАЛИЗИРОВАТЬ self.collection
+            # чтобы он ссылался на НОВУЮ, ПУСТУЮ коллекцию.
             self._create_or_get_collection() 
-            print(f"Коллекция ChromaDB '{self.collection_name}' пересоздана.")
+            print(f"Коллекция ChromaDB '{self.collection_name}' пересоздана и готова к использованию.")
 
+        except NotFoundError:
+            print(f"Предупреждение: Коллекция ChromaDB '{self.collection_name}' не существовала при попытке очистки.")
+            self._create_or_get_collection() 
+            print(f"Коллекция ChromaDB '{self.collection_name}' создана (после попытки очистки несуществующей).")
         except Exception as e:
-            if "does not exist" in str(e):
-                print(f"Предупреждение: Коллекция ChromaDB '{self.collection_name}' не существует при попытке очистки.")
-                self._create_or_get_collection()
-            else:
-                print(f"Ошибка при очистке ChromaDB коллекции: {e}")
+            # Если это не NotFoundError и не OSError при rmtree, то это действительно непредвиденная ошибка
+            print(f"Непредвиденная ошибка при очистке ChromaDB коллекции '{self.collection_name}': {e}")
