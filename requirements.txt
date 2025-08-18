@@ -5,3 +5,5 @@ ollama
 requests
 typing-extensions
 supabase
+pydub
+soundfile
