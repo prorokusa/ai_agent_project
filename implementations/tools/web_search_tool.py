@@ -21,7 +21,11 @@ class GoogleCSESearchTool(Tool):
         if not self.api_key or not self.cse_id:
             print("Предупреждение: GOOGLE_CSE_API_KEY или GOOGLE_CSE_ID не установлены. GoogleCSESearchTool будет использовать фиктивные данные.")
 
-    def execute(self, query: str) -> str:
+    # ИСПРАВЛЕНО: Метод execute теперь асинхронный
+    async def execute(self, query: str) -> str:
+        """
+        Выполняет поиск в Google CSE.
+        """
         if not self.api_key or not self.cse_id:
             # Фиктивный ответ, если API ключ не настроен
             if "столица франции" in query.lower():
@@ -42,6 +46,11 @@ class GoogleCSESearchTool(Tool):
         }
         
         try:
+            # ВНИМАНИЕ: requests.get() является синхронной функцией.
+            # Хотя мы сделали этот метод асинхронным (async def),
+            # вызов requests.get() будет блокировать основной цикл событий asyncio
+            # на время выполнения сетевого запроса. Для полноценной асинхронности
+            # следует использовать асинхронные HTTP-клиенты, такие как httpx или aiohttp.
             response = requests.get(base_url, params=params)
             response.raise_for_status() # Вызывает HTTPError для плохих ответов (4xx или 5xx)
             data = response.json()
@@ -55,7 +64,13 @@ class GoogleCSESearchTool(Tool):
                     snippets.append(f"Title: {title}\nSnippet: {snippet}\nURL: {link}")
                 return "\n---\n".join(snippets)
             elif 'error' in data:
-                return f"Google CSE Error: {data['error'].get('message', 'Неизвестная ошибка')}"
+                # Более детальный вывод ошибки Google CSE API
+                error_message = data['error'].get('message', 'Неизвестная ошибка')
+                # Дополнительная информация об ошибке, если есть
+                if 'errors' in data['error']:
+                    for err in data['error']['errors']:
+                        error_message += f" ({err.get('reason')}: {err.get('message')})"
+                return f"Google CSE Error: {error_message}"
             else:
                 return f"Google CSE: Не найдено результатов по запросу '{query}'."
         except requests.exceptions.RequestException as e:

@@ -1,5 +1,6 @@
 from typing import List, Dict, Any, Optional
 from interfaces.tool import Tool
+# import asyncio # Можно добавить этот импорт, но он не строго необходим, если execute_tool только await-ит другие async функции
 
 class ToolManager:
     """
@@ -23,7 +24,8 @@ class ToolManager:
         """Возвращает список всех зарегистрированных инструментов с их описаниями."""
         return [{"name": tool.name, "description": tool.description} for tool in self._tools.values()]
 
-    def execute_tool(self, tool_name: str, **kwargs) -> Any:
+    # ИСПРАВЛЕНО: Метод execute_tool теперь асинхронный
+    async def execute_tool(self, tool_name: str, **kwargs) -> Any:
         """
         Выполняет инструмент по имени.
         Args:
@@ -38,4 +40,5 @@ class ToolManager:
         if not tool:
             raise ValueError(f"Инструмент '{tool_name}' не найден.")
         print(f"Выполнение инструмента '{tool_name}' с аргументами: {kwargs}")
-        return tool.execute(**kwargs)
+        # ИСПРАВЛЕНО: Добавлен 'await' перед вызовом tool.execute
+        return await tool.execute(**kwargs)

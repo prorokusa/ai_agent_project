@@ -1,12 +1,15 @@
 import os
 import json 
 from typing import List, Dict, Union, Any, Optional, Callable, Awaitable 
+import logging # Добавим импорт logging
 
 from interfaces.llm import AbstractLLM
 from interfaces.memory import Memory
 from interfaces.vector_store import VectorStore
 from interfaces.tool import Tool
 from core.tool_manager import ToolManager # Импорт ToolManager
+
+logger = logging.getLogger(__name__) # Получим логгер для этого файла
 
 # Класс AgentContext используется для передачи состояния и данных
 # по всему конвейеру обработки запроса агента.
@@ -249,6 +252,11 @@ class AIAgent:
                             print(f"LLM запросила выполнение инструмента '{tool_name}' с аргументами: {tool_args}")
                             # Выполняем инструмент через ToolManager.
                             tool_output = await self.tool_manager.execute_tool(tool_name, **tool_args) 
+                            
+                            # --- ДОБАВЛЕНО ДЛЯ ОТЛАДКИ: Выводим полный результат инструмента ---
+                            logger.info(f"DEBUG: Полный вывод инструмента '{tool_name}' (ID: {tool_id}):\n{tool_output}\n--- КОНЕЦ ВЫВОДА ИНСТРУМЕНТА ---")
+                            # --- КОНЕЦ ОТЛАДОЧНОГО КОДА ---
+
                             context.tool_outputs.append({"tool_call_id": tool_id, "output": tool_output})
                             # Добавляем результат выполнения инструмента в память.
                             self.memory.add_message(role="tool", content=json.dumps({"tool_call_id": tool_id, "output": tool_output}))
