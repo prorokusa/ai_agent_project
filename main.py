@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-from core.agent import AIAgent, AgentContext, AgentProcessor, _PREDEFINED_FIELD_SETS # Импортируем наборы полей
+from core.agent import AIAgent, AgentContext, AgentProcessor, _PREDEFINED_FIELD_SETS
 from implementations.llms.simple_inference_llm import SimpleInferenceLLM
 from implementations.llms.openai_llm import OpenAI_LLM
 from implementations.llms.openrouter_llm import OpenRouter_LLM
@@ -18,8 +18,8 @@ from implementations.llms.openrouter_llm import OpenRouter_LLM
 from implementations.tools.calculator_tool import CalculatorTool
 from implementations.tools.web_search_tool import GoogleCSESearchTool
 from implementations.tools.text_extractor_tool import TextExtractorTool 
-from implementations.tools.structured_data_extractor_tool import StructuredDataExtractorTool # НОВЫЙ ИМПОРТ
-from implementations.tools.vector_store_cleaner_tool import VectorStoreCleanerTool # НОВЫЙ ИМПОРТ
+from implementations.tools.structured_data_extractor_tool import StructuredDataExtractorTool
+from implementations.tools.vector_store_cleaner_tool import VectorStoreCleanerTool
 
 from implementations.memory.chat_history_memory import ChatHistoryMemory
 from implementations.vector_stores.chromadb_store import ChromaDBStore
@@ -122,7 +122,6 @@ async def main():
     # my_vector_store = SimpleVectorStore(llm_for_embedding=my_llm)
     
     # 4. Системный промпт для агента:
-    # ОБНОВЛЕННЫЙ СИСТЕМНЫЙ ПРОМПТ
     system_prompt = (
         "Ты очень полезный, дружелюбный и компетентный AI ассистент, специализирующийся на анализе документов, особенно юридических и кадастровых. "
         "Твоя задача - точно отвечать на вопросы, использовать предоставленные инструменты, когда это уместно, "
@@ -151,26 +150,13 @@ async def main():
     ai_agent.register_tool(GoogleCSESearchTool())
     ai_agent.register_tool(TextExtractorTool())
     # РЕГИСТРИРУЕМ НОВЫЕ ИНСТРУМЕНТЫ
-    # Передаем LLM и vector_store в StructuredDataExtractorTool
     ai_agent.register_tool(StructuredDataExtractorTool(text_extractor_tool=TextExtractorTool(), llm_for_parsing=my_llm, vector_store=my_vector_store, predefined_field_sets=_PREDEFINED_FIELD_SETS))
     ai_agent.register_tool(VectorStoreCleanerTool(vector_store=my_vector_store))
 
-    # Загрузка начальных документов в векторное хранилище (без изменений)
-    await my_vector_store.clear()
-    await ai_agent.vector_store.add_documents([
-        "Мое любимое хобби - это чтение книг по истории и философия.",
-        "Я живу в городе Москва, работаю инженером в IT-компании, мой адрес: ул. Пушкина, 10.",
-        "Последний раз мы обсуждали планы на отпуск в горах Кавказа в июле 2024 года.",
-        "Имя моего питомца - Барсик, он рыжий кот и очень любит играть с лазерной указкой.",
-        "Мои предпочтения в еде включают итальянскую кухню, особенно пиццу и пасту."
-    ], metadatas=[
-        {"type": "hobby"},
-        {"type": "personal_info", "city": "Москва"},
-        {"type": "past_discussion", "year": 2024},
-        {"type": "pet_info"},
-        {"type": "food_prefs"}
-    ])
-    logger.info("Документы для векторного хранилища загружены.")
+    # --- УДАЛЕНЫ НАЧАЛЬНЫЕ ДОКУМЕНТЫ В ВЕКТОРНОЕ ХРАНИЛИЩЕ ---
+    # await my_vector_store.clear() # Этот вызов также можно удалить, если не нужно чистить при каждом старте
+    # logger.info("Начальные документы для векторного хранилища не загружаются.") # Можно добавить для ясности
+
 
     parser = argparse.ArgumentParser(description="AI Agent Project with Audio Transcription and Folder Monitoring.")
     parser.add_argument("--audio", type=str,
@@ -223,11 +209,11 @@ async def main():
 
     print("\n--- Начало интерактивного диалога с Агентом ---")
     print("Введите 'exit' для завершения.")
-    print("Чтобы отправить текстовый или PDF/JPG/PNG файл, используйте 'file:<путь_к_файлу>'")
-    print("Чтобы извлечь структурированные данные из файла, например: 'извлеки данные из файла 1.pdf по набору кадастровый_объект'")
-    print(f"Доступные наборы данных: {', '.join(_PREDEFINED_FIELD_SETS.keys())}")
-    print("Для очистки векторного хранилища, скажите что-то вроде: 'очисти раг' или 'удалить все данные из памяти'")
-    print("Чтобы отправить аудиофайл, введите 'audio:<путь_к_файлу.mp3>'")
+    print("Чтобы проанализировать файл (например, PDF, DOCX, JPG), введите 'file:<путь_к_файлу>' (например, 'file:document.pdf').")
+    print("Чтобы извлечь структурированные данные из файла, просто спросите, например: 'Извлеки кадастровые данные из файла 1.pdf'")
+    print(f"Доступные наборы данных для извлечения: {', '.join(_PREDEFINED_FIELD_SETS.keys())}")
+    print("Для очистки векторного хранилища (RAG), скажите что-то похожее на: 'очисти мой раг' или 'удали всю информацию из памяти'")
+    print("Чтобы отправить аудиофайл, введите 'audio:<путь_к_файлу.mp3>' (например, 'audio:voice_memo.mp3').")
     print(f"Автоматический мониторинг папки настроен в config.py (если MONITOR_DIRECTORY задан).")
     
     while True:
@@ -237,20 +223,14 @@ async def main():
             print("Завершение диалога.")
             break
         
-        # --- ОБРАБОТКА ВВОДА АГЕНТОМ ---
-        # Теперь все запросы проходят через LLM, которая решает, какой инструмент использовать.
-        # Просто передаем user_input (и file_path, если есть) в process_message.
-
         if user_input.lower().startswith("file:"):
             file_path = user_input[len("file:"):].strip()
-            response = await ai_agent.process_message(file_input=file_path, text_input=f"Проанализируй файл {os.path.basename(file_path)}.")
+            response = await ai_agent.process_message(file_input=file_path)
             print(f"Агент (обработка файла): {response}")
         elif user_input.lower().startswith("audio:"):
             audio_path = user_input[len("audio:"):].strip()
             await process_single_audio_input(ai_agent, audio_path)
         else:
-            # Для всех остальных запросов (текстовых, включая команды на извлечение или очистку)
-            # просто передаем их агенту. LLM сама решит, какой инструмент вызвать.
             response = await ai_agent.process_message(text_input=user_input)
             print(f"Агент: {response}")
 
@@ -267,7 +247,7 @@ async def main():
                 print(f"{msg['role']}: {msg['content']}")
         elif msg["role"] == "tool" and isinstance(msg["content"], str):
              try:
-                content_obj = json.loads(msg["content"])
+                content_obj = json.loads(msg["content"]) # Исправлено: было content_obj
                 output_preview = str(content_obj.get('output', ''))[:500] + ('...' if len(str(content_obj.get('output', ''))) > 500 else '')
                 print(f"tool (результат): Tool ID: {content_obj.get('tool_call_id', 'N/A')}, Output Preview: {json.dumps(output_preview, indent=2, ensure_ascii=False)}")
              except json.JSONDecodeError:

@@ -1,4 +1,4 @@
-# core/agent.py (ОБНОВЛЕНИЕ)
+# core/agent.py
 import os
 import json 
 from typing import List, Dict, Union, Any, Optional, Callable, Awaitable 
@@ -12,6 +12,7 @@ from core.tool_manager import ToolManager
 
 logger = logging.getLogger(__name__)
 
+# Класс AgentContext (без изменений)
 class AgentContext:
     def __init__(self, 
                  text_input: Optional[str] = None, 
@@ -31,7 +32,7 @@ class AgentContext:
 
 AgentProcessor = Callable[['AIAgent', AgentContext], Awaitable[None]]
 
-# --- ЗАРАНЕЕ ЗАГОТОВЛЕННЫЕ НАБОРЫ ПОЛЕЙ ДЛЯ ИЗВЛЕЧЕНИЯ ---
+# --- ЗАРАНЕЕ ЗАГОТОВЛЕННЫЕ НАБОРЫ ПОЛЕЙ ДЛЯ ИЗВЛЕЧЕНИЯ --- (без изменений)
 _PREDEFINED_FIELD_SETS: Dict[str, str] = {
     "кадастровый_объект": """
 - ФИО собственника
@@ -71,7 +72,6 @@ _PREDEFINED_FIELD_SETS: Dict[str, str] = {
 """
 }
 
-# Добавляем общий набор, который включает все вышеперечисленные
 _PREDEFINED_FIELD_SETS["все_данные"] = (
     _PREDEFINED_FIELD_SETS["кадастровый_объект"] + "\n" +
     _PREDEFINED_FIELD_SETS["паспортные_данные"] + "\n" +
@@ -143,13 +143,13 @@ class AIAgent:
                     "language": {"type": "string", "description": "Опциональный код языка для OCR (например, 'en' для английского, 'ru' для русского). Используется для изображений и PDF. По умолчанию определяется автоматически."} 
                 }
                 parameters["required"] = ["file_path"]
-            elif tool_name == "structured_data_extractor": # ОБНОВЛЕННЫЙ ИНСТРУМЕНТ
+            elif tool_name == "structured_data_extractor":
                 parameters["properties"] = {
                     "file_path": {"type": "string", "description": "Полный путь к файлу для извлечения структурированных данных."},
-                    "field_set_name": {"type": "string", "description": f"Название предопределенного набора полей для извлечения. Доступные наборы: {', '.join(_PREDEFINED_FIELD_SETS.keys())}. Используй 'все_данные' для извлечения всей доступной информации."}
+                    "field_set_name": {"type": "string", "description": f"Название предопределенного набора полей для извлечения. Доступные наборы: {', '.join(_PREDEFINED_FIELD_SETS.keys())}. Например, 'кадастровый_объект', 'паспортные_данные', 'реквизиты_организации' или 'все_данные'. Используй 'все_данные' для извлечения всей доступной информации."}
                 }
                 parameters["required"] = ["file_path", "field_set_name"]
-            elif tool_name == "vector_store_cleaner": # ОБНОВЛЕННЫЙ ИНСТРУМЕНТ
+            elif tool_name == "vector_store_cleaner":
                 parameters["properties"] = {
                     "confirm": {"type": "boolean", "description": "Необходимо установить в 'true' для подтверждения очистки векторного хранилища. Используйте с осторожностью!."}
                 }
@@ -222,19 +222,17 @@ class AIAgent:
     async def process_message(self, text_input: Optional[str] = None, file_input: Optional[str] = None) -> Union[str, Dict[str, Any]]:
         context = AgentContext(text_input=text_input, file_input_path=file_input)
         
-        # --- ОБНОВЛЕННАЯ ЛОГИКА ОБРАБОТКИ ФАЙЛОВОГО ВВОДА ---
         if context.file_input_path:
             if not os.path.exists(context.file_input_path):
                 context.final_response = f"Ошибка: Файл не найден по пути '{context.file_input_path}'."
                 context.processed_successfully = False
                 return context.final_response
             
-            # Если получен путь к файлу, *исходный text_input* становится запросом к LLM
-            # (чтобы LLM сама решила, какой инструмент использовать).
-            # Если file_input был передан без text_input, создаем дефолтный запрос.
             if not context.text_input:
-                context.text_input = f"Пожалуйста, проанализируй содержимое файла: {context.file_input_path}."
-
+                context.text_input = f"Пожалуйста, проанализируй содержимое файла: '{context.file_input_path}'. Дай краткую фабулу о чем он."
+            else:
+                context.text_input = f"{context.text_input} (в контексте файла: '{context.file_input_path}')"
+            
             print(f"\nАгент получил запрос с файлом: '{context.file_input_path}'. Исходный запрос LLM: '{context.text_input[:100]}...'")
             self.memory.add_message(role="user", content=context.text_input) 
             context.current_prompt_for_llm = context.text_input 
@@ -245,6 +243,8 @@ class AIAgent:
             context.final_response = "Не получено никакого ввода (текста или файла)."
             context.processed_successfully = False
             return context.final_response
+
+        should_break_outer_loop = False 
 
         for i in range(self.max_tool_iterations):
             print(f"\n--- Итерация {i+1} агента ---")
@@ -277,6 +277,8 @@ class AIAgent:
 
                 if isinstance(context.llm_response_raw, dict) and "tool_calls" in context.llm_response_raw:
                     context.tool_calls = context.llm_response_raw["tool_calls"]
+                    
+                    # --- КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Добавляем сообщение ассистента с tool_calls в память ПЕРЕД выполнением инструментов ---
                     self.memory.add_message(role="assistant", content=json.dumps({"tool_calls": context.tool_calls}))
                     
                     for tool_call in context.tool_calls:
@@ -290,25 +292,52 @@ class AIAgent:
                             
                             logger.info(f"DEBUG: Полный вывод инструмента '{tool_name}' (ID: {tool_id}):\n{str(tool_output)[:500]}...\n--- КОНЕЦ ВЫВОДА ИНСТРУМЕНТА ---")
                             
-                            # --- УПРОЩЕННАЯ ОБРАБОТКА ВЫВОДА ИНСТРУМЕНТОВ ---
-                            # StructuredDataExtractorTool и VectorStoreCleanerTool теперь сами форматируют вывод
-                            formatted_output = (
-                                f"**Результат выполнения инструмента '{tool_name}' (ID: {tool_id}):**\n"
-                                f"```\n{str(tool_output)}\n```"
-                            )
+                            formatted_output_for_memory = str(tool_output)
                             
-                            context.tool_outputs.append({"tool_call_id": tool_id, "output": formatted_output})
-                            self.memory.add_message(role="tool", content=json.dumps({"tool_call_id": tool_id, "output": formatted_output}))
+                            # --- ДОПОЛНИТЕЛЬНАЯ ЛОГИКА ДЛЯ ФИНАЛЬНОГО ОТВЕТА ПОСЛЕ ИНСТРУМЕНТА ---
+                            if tool_name == "text_extractor" and isinstance(tool_output, str) and self.vector_store:
+                                file_path_from_args = tool_args.get("file_path", "неизвестный файл")
+                                logger.info(f"text_extractor вернул текст из '{file_path_from_args}'. Индексирую в векторном хранилище и формирую фабулу.")
+                                chunks = self._chunk_text(tool_output, max_chunk_size=1500, overlap_size=200)
+                                metadatas = [
+                                    {"source_file": file_path_from_args, "chunk_index": i, "type": "text_summary_source"} 
+                                    for i in range(len(chunks))
+                                ]
+                                await self.vector_store.add_documents(chunks, metadatas=metadatas)
+                                
+                                # Формируем окончательный ответ для агента
+                                context.final_response = (
+                                    f"Файл '{os.path.basename(file_path_from_args)}' успешно обработан и его содержимое проиндексировано. "
+                                    f"Я готов ответить на вопросы по его содержимому, используя проиндексированные данные. "
+                                    f"Краткая фабула документа:\n\n{tool_output[:min(len(tool_output), 500)]}..." # Обрежем для фабулы
+                                )
+                                context.processed_successfully = True # Отмечаем успех
+                                should_break_outer_loop = True # Сигнал для выхода из внешнего цикла
+
+                            elif tool_name in ["structured_data_extractor", "vector_store_cleaner"]:
+                                context.final_response = tool_output # tool_output уже содержит отформатированное сообщение
+                                context.processed_successfully = True
+                                should_break_outer_loop = True 
+                                
+                            # --- КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Добавляем результат выполнения инструмента в память ---
+                            self.memory.add_message(role="tool", content=json.dumps({"tool_call_id": tool_id, "output": formatted_output_for_memory}))
                             
                         except Exception as e:
                             error_msg = f"Ошибка при выполнении инструмента '{tool_name}': {type(e).__name__}: {e}. Аргументы: {tool_args}"
                             self.memory.add_message(role="system_error", content=error_msg)
                             print(error_msg)
-                            context.tool_outputs.append({"tool_call_id": tool_id, "output": f"Ошибка выполнения: {error_msg}"})
+                            # Всегда добавляем ошибку выполнения инструмента в память
                             self.memory.add_message(role="tool", content=json.dumps({"tool_call_id": tool_id, "output": f"Ошибка выполнения: {error_msg}"}))
+                            context.tool_outputs.append({"tool_call_id": tool_id, "output": f"Ошибка выполнения: {error_msg}"}) # Добавляем для логики agent
                     
                     await self._run_processors(self._post_tool_execution_processors, context)
 
+                    # Если какой-либо инструмент уже установил final_response и флаг should_break_outer_loop, выходим.
+                    if should_break_outer_loop:
+                        break 
+                    
+                    # Если нет final_response, но были вызовы инструментов, формируем промпт для следующего запроса LLM
+                    # (это произойдет, если LLM вызвала, например, calculator или search и ждет следующего шага)
                     tool_results_for_llm = [output_item["output"] for output_item in context.tool_outputs]
                     tool_results_str = "\n\n".join(tool_results_for_llm)
 
@@ -320,10 +349,10 @@ class AIAgent:
                         f"Если текста недостаточно для ответа, прямо сообщи об этом, опираясь на предоставленный текст.**"
                     )
                     
-                else:
+                else: # LLM не запросила инструменты, значит, дала окончательный текстовый ответ.
                     context.final_response = context.llm_response_raw
                     context.processed_successfully = True
-                    break
+                    break # Завершаем главный цикл итераций.
                         
             except Exception as e:
                 context.error_message = f"Ошибка при вызове LLM или парсинге ответа: {type(e).__name__}: {e}"
@@ -332,11 +361,18 @@ class AIAgent:
                 context.processed_successfully = False
                 break
 
+        # Если после всех итераций не удалось получить окончательный ответ, формируем дефолтный ответ.
         if not context.final_response:
             context.final_response = "Я выполнил некоторые действия с инструментами, но пока не могу сформулировать окончательный ответ. Попробуйте уточнить запрос."
             context.processed_successfully = False
         
         await self._run_processors(self._final_response_processors, context)
         
-        self.memory.add_message(role="assistant", content=context.final_response)
+        # Добавляем окончательный ответ агента в память, если он еще не был добавлен
+        # Это может случиться, если final_response был установлен инструментом, но не через прямой ответ LLM.
+        last_mem_msg = self.memory.get_history()[-1] if self.memory.get_history() else None
+        # Проверяем, чтобы не добавить одно и то же сообщение дважды
+        if not (last_mem_msg and last_mem_msg["role"] == "assistant" and last_mem_msg["content"] == context.final_response):
+             self.memory.add_message(role="assistant", content=context.final_response)
+             
         return context.final_response
