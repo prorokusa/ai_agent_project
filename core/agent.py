@@ -1,7 +1,7 @@
 import os
 import json 
 from typing import List, Dict, Union, Any, Optional, Callable, Awaitable 
-import logging # Добавим импорт logging
+import logging 
 
 from interfaces.llm import AbstractLLM
 from interfaces.memory import Memory
@@ -120,6 +120,42 @@ class AIAgent:
                     "language": {"type": "string", "description": "Опциональный код языка для OCR (например, 'en' для английского, 'ru' для русского). Используется для изображений и PDF. По умолчанию определяется автоматически."} 
                 }
                 parameters["required"] = ["file_path"] # 'language' остается опциональным, поэтому его нет в required
+            # НОВЫЕ ИНСТРУМЕНТЫ ДЛЯ КАДАСТРОВОГО ИНЖЕНЕРА
+            elif tool_name == "ftp_audio_processor":
+                parameters["properties"] = {
+                    "ftp_host": {"type": "string", "description": "Адрес FTP-сервера (например, 'ftp.example.com')."},
+                    "ftp_user": {"type": "string", "description": "Имя пользователя для подключения к FTP."},
+                    "ftp_password": {"type": "string", "description": "Пароль для подключения к FTP."},
+                    "remote_path": {"type": "string", "description": "Путь к папке на FTP-сервере для мониторинга (например, '/audio_uploads/')."},
+                    "local_download_dir": {"type": "string", "description": "Локальная директория для временного скачивания файлов перед транскрибацией (например, '/tmp/ftp_audio_downloads/')."},
+                    "allowed_audio_extensions": {"type": "array", "items": {"type": "string"}, "description": "Опциональный список расширений аудиофайлов для отслеживания (например, ['.mp3', '.wav'])."},
+                    "clear_remote_after_processing": {"type": "boolean", "description": "Если 'true', удаляет файлы с FTP-сервера после успешной транскрибации. Используйте с осторожностью! По умолчанию 'false'."}
+                }
+                parameters["required"] = ["ftp_host", "ftp_user", "ftp_password", "remote_path", "local_download_dir"]
+            elif tool_name == "google_calendar_tool":
+                parameters["properties"] = {
+                    "summary": {"type": "string", "description": "Название или краткое описание события в календаре."},
+                    "start_time": {"type": "string", "description": "Время начала события в формате ISO 8601 (например, '2025-08-21T09:00:00+03:00')."},
+                    "end_time": {"type": "string", "description": "Время окончания события в формате ISO 8601 (например, '2025-08-21T10:00:00+03:00')."},
+                    "description": {"type": "string", "description": "Подробное описание события."},
+                    "location": {"type": "string", "description": "Место проведения события."},
+                    "attendees": {"type": "array", "items": {"type": "string"}, "description": "Список email-адресов участников."}
+                }
+                parameters["required"] = ["summary", "start_time", "end_time"]
+            elif tool_name == "google_tasks_tool":
+                parameters["properties"] = {
+                    "title": {"type": "string", "description": "Название или краткое описание задачи."},
+                    "due_date": {"type": "string", "description": "Дата срока выполнения задачи в формате ISO 8601 (только дата, например, '2025-08-21')."},
+                    "notes": {"type": "string", "description": "Подробное описание задачи."},
+                    "task_list_id": {"type": "string", "description": "ID списка задач, в который следует добавить задачу. Если не указан, используется основной список."}
+                }
+                parameters["required"] = ["title"]
+            elif tool_name == "google_keep_note_tool":
+                parameters["properties"] = {
+                    "title": {"type": "string", "description": "Заголовок для новой заметки."},
+                    "content": {"type": "string", "description": "Основное содержание заметки."}
+                }
+                parameters["required"] = ["title", "content"]
             # Если у вас есть другие инструменты, добавьте их сюда аналогичным образом:
             # elif tool_name == "my_new_tool":
             #     parameters["properties"] = {"arg1": {"type": "string", "description": "Описание аргумента 1."}}
@@ -253,9 +289,7 @@ class AIAgent:
                             # Выполняем инструмент через ToolManager.
                             tool_output = await self.tool_manager.execute_tool(tool_name, **tool_args) 
                             
-                            # --- ДОБАВЛЕНО ДЛЯ ОТЛАДКИ: Выводим полный результат инструмента ---
                             logger.info(f"DEBUG: Полный вывод инструмента '{tool_name}' (ID: {tool_id}):\n{tool_output}\n--- КОНЕЦ ВЫВОДА ИНСТРУМЕНТА ---")
-                            # --- КОНЕЦ ОТЛАДОЧНОГО КОДА ---
 
                             context.tool_outputs.append({"tool_call_id": tool_id, "output": tool_output})
                             # Добавляем результат выполнения инструмента в память.
@@ -300,6 +334,11 @@ class AIAgent:
                                 formatted_output = (
                                     f"**Успешно извлеченный текст из файла '{file_path_in_args}':**\n" 
                                     f"```markdown\n{output_content}\n```" # ТЕКСТ БЕЗ ОБРЕЗКИ
+                                )
+                            elif tool_name == "ftp_audio_processor" and isinstance(output_content, str):
+                                formatted_output = (
+                                    f"**Результат обработки FTP-аудио:**\n"
+                                    f"```\n{output_content}\n```" # ТЕКСТ БЕЗ ОБРЕЗКИ
                                 )
                             else:
                                 # Для других инструментов или ошибок

@@ -18,3 +18,6 @@ chroma_data/
 
 # Temporary files
 *.txt # Если у вас есть временные .txt файлы типа temp_project_summary.txt, не коммитьте их.
+
+token.pickle
+credentials.json
