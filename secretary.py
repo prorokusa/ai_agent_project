@@ -138,67 +138,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    print("\n--- Инструкции по настройке и запуску ---")
-    print("1. **Файл `.env` (для чувствительных данных):**")
-    print("   Разместите файл `.env` в корневой директории вашего проекта.")
-    print("   Содержимое '.env' (замените на ваши реальные данные):")
-    print("""
-# OPENAI API KEY
-OPENAI_API_KEY=sk-...
 
-# MISTRAL AI API KEY
-MISTRAL_API_KEY=your_mistral_api_key_here
-
-# LLAMAINDEX CLOUD API KEY
-LLAMAINDEX_CLOUD_API_KEY=your_llamaindex_cloud_api_key_here
-
-# Google Custom Search API Keys
-GOOGLE_CSE_API_KEY=your_google_cse_api_key_here
-GOOGLE_CSE_ID=your_google_cse_id_here
-
-# OpenRouter API Keys (если используется OpenRouter_LLM)
-# OPENROUTER_API_KEYS=sk-or-v1-...,sk-or-v1-...
-
-# FTP Credentials (для ftp_monitor.py)
-# !!! Обязательно замените на ваши реальные данные FTP для тестирования !!!
-FTP_HOST=your_ftp_host.com
-FTP_USER=your_ftp_username
-FTP_PASSWORD=your_ftp_password_here
-
-# Google API Client ID & Secret (для Google Calendar/Tasks/Keep)
-# Получите из Google Cloud Console (OAuth 2.0 Client ID for Desktop app)
-GOOGLE_CLIENT_ID=ВАШ_CLIENT_ID_ЗДЕСЬ.apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=ВАШ_CLIENT_SECRET_ЗДЕСЬ
-
-# Имя пользователя/владельца агента для включения в записи
-AGENT_OWNER_NAME="Зоткин Алексей Анатольевич"
-    """)
-    print("\n2. **Файл `config.py` (для общих настроек):**")
-    print("   Убедитесь, что `config.py` содержит необходимые настройки, особенно для FTP-мониторинга:")
-    print("""
-# Пример из config.py:
-FTP_MONITOR_ENABLED = True # Измените на True для активации
-FTP_MONITOR_INTERVAL_SECONDS = 30 # Интервал проверки
-FTP_MONITOR_REMOTE_PATH = "/Documents/CallRecord/" # Путь на FTP (убедитесь, что это правильный путь на вашем FTP)
-FTP_MONITOR_LOCAL_DOWNLOAD_DIR = "./temp_ftp_downloads/" # Локальная папка
-FTP_MONITOR_CLEAR_REMOTE_AFTER_PROCESSING = False # Удалять ли с FTP (будьте осторожны)
-FTP_MONITOR_ALLOWED_EXTENSIONS = [".mp3", ".wav", ".awb", ".amr"] # Разрешенные расширения
-
-GOOGLE_CALENDAR_ENABLED=True # Измените на True для активации
-GOOGLE_TASKS_ENABLED=True    # Измените на True для активации
-GOOGLE_KEEP_ENABLED=False    # Измените на True для активации (но это заглушка)
-    """)
-    print("\n3. **Установка зависимостей:**")
-    print("   pip install python-dotenv openai aioftp pydub")
-    print("   pip install google-api-python-client google-auth-oauthlib google-auth")
-    print("   pip install chromadb (если используете ChromaDB)")
-    print("\n4. **Настройка Google Cloud Console (для GOOGLE_CALENDAR_ENABLED/GOOGLE_TASKS_ENABLED):**")
-    print("   - Включите 'Google Calendar API' и 'Google Tasks API'.")
-    print("   - Создайте 'OAuth 2.0 Client ID' (тип 'Desktop app').")
-    print("   - В 'Authorized redirect URIs' добавьте 'http://localhost'.")
-    print("   - При первом запуске скрипт выведет URL в консоль. Откройте этот URL в браузере на ВАШЕМ WINDOWS-ХОСТЕ, авторизуйтесь, скопируйте КОД АВТОРИЗАЦИИ из браузера и вставьте его обратно в консоль WSL.")
-    print("\n--- Запуск агента ---")
-    print("Выполните команду: python main.py")
 
     try:
         asyncio.run(main())
